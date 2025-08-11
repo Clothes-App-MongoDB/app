@@ -27,7 +27,8 @@ export type Product = {
   price: number;
   oldPrice?: number;
   image: string;
-  rating?: number;
+  ratingAvg?: number;
+  ratingCount?: number;
 };
 
 export default function HomeScreen() {
@@ -110,7 +111,9 @@ export default function HomeScreen() {
       </Text>
       <View style={styles.ratingContainer}>
         <Ionicons name="star" size={14} color="#fff" />
-        <Text style={styles.ratingText}>{item.rating || 4.5}</Text>
+        <Text style={styles.ratingText}>
+          {(item.ratingAvg ?? 0).toFixed(1)}
+        </Text>
       </View>
     </TouchableOpacity>
   );

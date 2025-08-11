@@ -10,12 +10,15 @@ import {
     Dimensions,
     Alert,
     Modal,
+    TextInput,
+    ActivityIndicator,
 } from 'react-native';
 import Carousel from 'react-native-reanimated-carousel';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import { BASE_URL } from '../src/config';
 import { useCart } from '../src/CartContext';
+import { useAuth } from '../src/AuthContext';
 
 type Product = {
     _id: string;
@@ -32,6 +35,8 @@ type Product = {
         size: string;
         quantity: number;
     }[];
+    ratingAvg?: number | null;
+    ratingCount?: number;
 };
 
 type ProductType = {
@@ -59,9 +64,17 @@ export default function ProductDetail() {
     const [selectedColor, setSelectedColor] = useState<string | null>(null);
     const [selectedSize, setSelectedSize] = useState<string | null>(null);
     const [quantity, setQuantity] = useState(1);
+    const [isFavorite, setIsFavorite] = useState(false);
+    const [comments, setComments] = useState<any[]>([]);
+    const [commentsLoading, setCommentsLoading] = useState(false);
+    const [myComment, setMyComment] = useState<any | null>(null);
+    const [ratingInput, setRatingInput] = useState<number>(0);
+    const [contentInput, setContentInput] = useState<string>('');
+    const [isEditing, setIsEditing] = useState<boolean>(false);
     const uniqueColors = product?.variations ? [...new Set(product.variations.map(v => v.color))] : [];
     const uniqueSizes = product?.variations ? [...new Set(product.variations.map(v => v.size))] : [];
     const { addToCart } = useCart();
+    const { token, user } = useAuth();
 
 
     const handleAddToCart = () => {
@@ -91,8 +104,11 @@ export default function ProductDetail() {
     // Move fetchProduct before useEffect
     const fetchProduct = async () => {
         try {
-            const res = await axios.get(`${BASE_URL}/api/products/${id}`);
+            const res = await axios.get(`${BASE_URL}/api/products/${id}` , {
+                headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            });
             setProduct(res.data);
+            setIsFavorite(!!(res.data?.isFavorite));
         } catch (err) {
             Alert.alert('Lỗi', 'Không thể tải sản phẩm');
         }
@@ -101,6 +117,39 @@ export default function ProductDetail() {
     useEffect(() => {
         if (id) fetchProduct();
     }, [id]);
+
+    // Load comments
+    useEffect(() => {
+        const loadComments = async () => {
+            if (!id) return;
+            setCommentsLoading(true);
+            try {
+                const res = await axios.get(`${BASE_URL}/api/comments/product/${id}`);
+                const items = res.data?.items || [];
+                setComments(items);
+                // find my comment if logged in
+                if (token) {
+                    const storedMy = items.find((c: any) => c.user_id?._id === user?.id);
+                    if (storedMy) {
+                        setMyComment(storedMy);
+                        setRatingInput(storedMy.rating || 0);
+                        setContentInput(storedMy.content || '');
+                        setIsEditing(false);
+                    } else {
+                        setMyComment(null);
+                        setRatingInput(0);
+                        setContentInput('');
+                        setIsEditing(true);
+                    }
+                }
+            } catch (e) {
+                // ignore
+            } finally {
+                setCommentsLoading(false);
+            }
+        };
+        loadComments();
+    }, [id, token]);
 
     useEffect(() => {
         setRelatedProducts([]);
@@ -243,6 +292,40 @@ export default function ProductDetail() {
                         )}
                     />
 
+                    {/* Heart favorite button */}
+                    <TouchableOpacity
+                        style={styles.heartButton}
+                        onPress={async () => {
+                            if (!token) {
+                                Alert.alert('Bạn cần đăng nhập', 'Vui lòng đăng nhập để sử dụng danh sách yêu thích', [
+                                    { text: 'Huỷ' },
+                                    { text: 'Đăng nhập', onPress: () => router.push('/(auth)/LoginScreen') },
+                                ]);
+                                return;
+                            }
+                            if (!product) return;
+                            try {
+                                if (isFavorite) {
+                                    setIsFavorite(false);
+                                    await axios.delete(`${BASE_URL}/api/wishlists/${product._id}`, {
+                                        headers: { Authorization: `Bearer ${token}` },
+                                    });
+                                } else {
+                                    setIsFavorite(true);
+                                    await axios.post(`${BASE_URL}/api/wishlists`, { productId: product._id }, {
+                                        headers: { Authorization: `Bearer ${token}` },
+                                    });
+                                }
+                            } catch (e: any) {
+                                // revert on error
+                                setIsFavorite(prev => !prev);
+                                Alert.alert('Lỗi', e?.response?.data?.message || 'Không thể cập nhật yêu thích');
+                            }
+                        }}
+                    >
+                        <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={26} color={isFavorite ? 'red' : '#fff'} />
+                    </TouchableOpacity>
+
                     {/* Pagination Dots */}
                     <View style={styles.paginationContainer}>
                         {images.map((_, index) => (
@@ -305,7 +388,149 @@ export default function ProductDetail() {
 
                 {tab === 'reviews' && (
                     <View style={styles.detailBox}>
-                        <Text style={{ color: '#888' }}>Chưa có đánh giá.</Text>
+                        {/* Summary */}
+                        <View style={styles.ratingSummary}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                {Array.from({ length: 5 }).map((_, idx) => (
+                                    <Ionicons
+                                        key={idx}
+                                        name={(product?.ratingAvg ?? 0) >= idx + 1 ? 'star' : (product?.ratingAvg ?? 0) >= idx + 0.5 ? 'star-half' : 'star-outline'}
+                                        size={18}
+                                        color={'#f5a623'}
+                                        style={{ marginRight: 2 }}
+                                    />
+                                ))}
+                            </View>
+                            <Text style={{ marginLeft: 8, color: '#333' }}>
+                                {(product?.ratingAvg ?? 0).toFixed(1)} ({product?.ratingCount || 0})
+                            </Text>
+                        </View>
+
+                        {/* Add/Edit comment */}
+                        {!token ? (
+                            <TouchableOpacity
+                                onPress={() => router.push('/(auth)/LoginScreen')}
+                                style={styles.loginPromptBtn}
+                            >
+                                <Text style={{ color: '#fff', fontWeight: '600' }}>Đăng nhập để đánh giá</Text>
+                            </TouchableOpacity>
+                        ) : myComment && !isEditing ? (
+                            <View style={styles.commentBox}>
+                                <Text style={styles.sectionHeader}>Đánh giá của bạn</Text>
+                                <View style={{ flexDirection: 'row', marginBottom: 6 }}>
+                                    {Array.from({ length: 5 }).map((_, idx) => (
+                                        <Ionicons key={idx} name={(myComment.rating ?? 0) >= idx + 1 ? 'star' : 'star-outline'} size={18} color={'#f5a623'} style={{ marginRight: 2 }} />
+                                    ))}
+                                </View>
+                                <Text style={{ color: '#333', marginBottom: 8 }}>{myComment.content}</Text>
+                                <TouchableOpacity style={styles.submitBtn} onPress={() => setIsEditing(true)}>
+                                    <Text style={{ color: '#fff', fontWeight: '600' }}>Chỉnh sửa đánh giá</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : (
+                            <View style={styles.commentBox}>
+                                <Text style={styles.sectionHeader}>{myComment ? 'Cập nhật đánh giá của bạn' : 'Đánh giá sản phẩm'}</Text>
+                                <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+                                    {Array.from({ length: 5 }).map((_, idx) => (
+                                        <TouchableOpacity key={idx} onPress={() => setRatingInput(idx + 1)}>
+                                            <Ionicons name={ratingInput >= idx + 1 ? 'star' : 'star-outline'} size={22} color={'#f5a623'} style={{ marginRight: 4 }} />
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                                <TextInput
+                                    value={contentInput}
+                                    onChangeText={setContentInput}
+                                    placeholder="Chia sẻ cảm nhận của bạn về sản phẩm"
+                                    multiline
+                                    style={styles.commentInput}
+                                />
+                                <TouchableOpacity
+                                    style={styles.submitBtn}
+                                    onPress={async () => {
+                                        if (!product) return;
+                                        if (ratingInput < 1 || ratingInput > 5) {
+                                            Alert.alert('Vui lòng chọn số sao (1-5)');
+                                            return;
+                                        }
+                                        if (!contentInput.trim()) {
+                                            Alert.alert('Vui lòng nhập nội dung đánh giá');
+                                            return;
+                                        }
+                                        try {
+                                            if (myComment) {
+                                                await axios.put(
+                                                    `${BASE_URL}/api/comments/${myComment._id}`,
+                                                    { content: contentInput.trim(), rating: ratingInput },
+                                                    { headers: { Authorization: `Bearer ${token}` } }
+                                                );
+                                            } else {
+                                                await axios.post(
+                                                    `${BASE_URL}/api/comments`,
+                                                    { productId: product._id, content: contentInput.trim(), rating: ratingInput },
+                                                    { headers: { Authorization: `Bearer ${token}` } }
+                                                );                                                
+                                            }
+                                            // reload comments and product summary
+                                            await fetchProduct();
+                                            // reload list
+                                            const res = await axios.get(`${BASE_URL}/api/comments/product/${product._id}`);
+                                            const items = res.data?.items || [];
+                                            setComments(items);
+                                            const mine = items.find((c: any) => c.user_id?._id === user?.id);
+                                            setMyComment(mine || null);
+                                            if (mine) {
+                                                setRatingInput(mine.rating || 0);
+                                                setContentInput(mine.content || '');
+                                                setIsEditing(false);
+                                            }
+                                            Alert.alert('Thành công', myComment ? 'Đã cập nhật đánh giá' : 'Đã gửi đánh giá');
+                                        } catch (e: any) {
+                                            Alert.alert('Lỗi', e?.response?.data?.message || 'Không thể gửi đánh giá');
+                                        }
+                                    }}
+                                >
+                                    <Text style={{ color: '#fff', fontWeight: '600' }}>{myComment ? 'Cập nhật' : 'Gửi đánh giá'}</Text>
+                                </TouchableOpacity>
+                                {myComment && (
+                                    <TouchableOpacity
+                                        style={[styles.submitBtn, { backgroundColor: '#aaa', marginTop: 8 }]}
+                                        onPress={() => {
+                                            setIsEditing(false);
+                                            setRatingInput(myComment.rating || 0);
+                                            setContentInput(myComment.content || '');
+                                        }}
+                                    >
+                                        <Text style={{ color: '#fff', fontWeight: '600' }}>Hủy</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        )}
+
+                        {/* Comments list */}
+                        {commentsLoading ? (
+                            <ActivityIndicator style={{ marginTop: 12 }} />
+                        ) : (
+                            <View style={{ marginTop: 10 }}>
+                                {comments.length === 0 ? (
+                                    <Text style={{ color: '#888' }}>Chưa có đánh giá.</Text>
+                                ) : (
+                                    comments.map((c) => (
+                                        <View key={c._id} style={styles.commentItem}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                                <View style={styles.avatarPlaceholder} />
+                                                <Text style={{ fontWeight: '600', marginLeft: 8 }}>{c.user_id?.full_name || 'Người dùng'}</Text>
+                                            </View>
+                                            <View style={{ flexDirection: 'row', marginBottom: 4 }}>
+                                                {Array.from({ length: 5 }).map((_, idx) => (
+                                                    <Ionicons key={idx} name={c.rating >= idx + 1 ? 'star' : 'star-outline'} size={16} color={'#f5a623'} style={{ marginRight: 2 }} />
+                                                ))}
+                                            </View>
+                                            <Text style={{ color: '#333' }}>{c.content}</Text>
+                                        </View>
+                                    ))
+                                )}
+                            </View>
+                        )}
                     </View>
                 )}
 
@@ -420,6 +645,57 @@ const styles = StyleSheet.create({
         fontWeight: '500',
         textAlign: 'center',
     },
+    ratingSummary: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    loginPromptBtn: {
+        backgroundColor: '#f66',
+        paddingVertical: 10,
+        borderRadius: 8,
+        alignItems: 'center',
+        marginTop: 8,
+    },
+    commentBox: {
+        marginTop: 8,
+        borderWidth: 1,
+        borderColor: '#eee',
+        borderRadius: 8,
+        padding: 10,
+    },
+    sectionHeader: {
+        fontWeight: '700',
+        marginBottom: 8,
+        color: '#333',
+    },
+    commentInput: {
+        borderWidth: 1,
+        borderColor: '#ddd',
+        borderRadius: 6,
+        minHeight: 60,
+        padding: 8,
+        textAlignVertical: 'top',
+        backgroundColor: '#fff',
+    },
+    submitBtn: {
+        backgroundColor: '#3366FF',
+        alignItems: 'center',
+        paddingVertical: 10,
+        borderRadius: 8,
+        marginTop: 10,
+    },
+    commentItem: {
+        borderTopWidth: 1,
+        borderTopColor: '#eee',
+        paddingVertical: 8,
+    },
+    avatarPlaceholder: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#ddd',
+    },
     paginationContainer: {
         flexDirection: 'row',
         justifyContent: 'center',
@@ -517,6 +793,15 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 16,
         fontWeight: 'bold',
+    },
+    heartButton: {
+        position: 'absolute',
+        top: 12,
+        right: 12,
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        padding: 8,
+        borderRadius: 20,
+        zIndex: 10,
     },
 
 });
