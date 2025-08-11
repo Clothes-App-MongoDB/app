@@ -21,7 +21,8 @@ export type Product = {
     price: number;
     oldPrice?: number;
     image: string;
-    rating?: number;
+    ratingAvg?: number;
+    ratingCount?: number;
 };
 
 const subCategories = [
@@ -136,6 +137,12 @@ export default function CategoryList() {
                         <Text numberOfLines={2} style={styles.productName}>
                             {item.name}
                         </Text>
+                        <View style={styles.ratingContainer}>
+                            <Ionicons name="star" size={14} color="#fff" />
+                            <Text style={styles.ratingText}>
+                                {(item.ratingAvg ?? 0).toFixed(1)}{item.ratingCount ? ` (${item.ratingCount})` : ''}
+                            </Text>
+                        </View>
                     </TouchableOpacity>
                 )}
             />
@@ -275,5 +282,21 @@ const styles = StyleSheet.create({
         color: '#333',
         marginHorizontal: 8,
         marginBottom: 8,
+    },
+    ratingContainer: {
+        flexDirection: 'row',
+        backgroundColor: '#2856f9',
+        alignItems: 'center',
+        paddingHorizontal: 6,
+        paddingVertical: 3,
+        borderRadius: 12,
+        alignSelf: 'flex-start',
+        marginHorizontal: 8,
+        marginBottom: 8,
+    },
+    ratingText: {
+        fontSize: 12,
+        color: '#fff',
+        marginLeft: 4,
     },
 });

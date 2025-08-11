@@ -18,7 +18,8 @@ interface Product {
     name: string;
     image: string;
     price: number;
-
+    ratingAvg?: number;
+    ratingCount?: number;
 }
 
 
@@ -85,6 +86,12 @@ export default function ProductByCategoryScreen() {
                             <Image source={{ uri: item.image }} style={styles.image} />
                             <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
                             <Text style={styles.price}>{item.price.toLocaleString()}₫</Text>
+                            <View style={styles.ratingContainer}>
+                                <Ionicons name="star" size={14} color="#fff" />
+                                <Text style={styles.ratingText}>
+                                    {(item.ratingAvg ?? 0).toFixed(1)}{item.ratingCount ? ` (${item.ratingCount})` : ''}
+                                </Text>
+                            </View>
                         </TouchableOpacity>
                     )}
                 />
@@ -153,6 +160,21 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#d0021b',
         fontWeight: '600',
+    },
+    ratingContainer: {
+        flexDirection: 'row',
+        backgroundColor: '#2856f9',
+        alignItems: 'center',
+        paddingHorizontal: 6,
+        paddingVertical: 3,
+        borderRadius: 12,
+        alignSelf: 'flex-start',
+        marginTop: 6,
+    },
+    ratingText: {
+        fontSize: 12,
+        color: '#fff',
+        marginLeft: 4,
     },
 });
 
